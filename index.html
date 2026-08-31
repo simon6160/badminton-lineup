@@ -13,16 +13,6 @@
     <script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
     <!-- Lucide Icons UMD -->
     <script src="https://unpkg.com/lucide@latest/dist/umd/lucide.js"></script>
-    <style>
-        @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Oswald:wght@500;600&display=swap');
-        body { font-family: 'Noto Sans TC', sans-serif; background: #EDEAE2; color: #16233A; margin: 0; padding: 16px; }
-        .font-num { font-family: 'Oswald', 'Noto Sans TC', sans-serif; }
-        .bl-scroll::-webkit-scrollbar { width: 6px; }
-        .bl-scroll::-webkit-scrollbar-thumb { background: #c8c2b0; border-radius: 4px; }
-        .bl-btn { cursor: pointer; border: none; font-family: inherit; }
-        .bl-btn:active { transform: scale(0.97); }
-        .bl-row { transition: background 0.15s, border-color 0.15s; }
-    </style>
 </head>
 <body>
     <div id="root"></div>
@@ -30,930 +20,952 @@
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
+        // 1. 確保 window.storage 存在（如果是在一般瀏覽器中開啟，給予 polyfill 支援）
+        if (!window.storage) {
+            window.storage = {
+                get: async (key) => {
+                    const val = localStorage.getItem(key);
+                    return val ? { value: val } : null;
+                },
+                set: async (key, value) => {
+                    localStorage.setItem(key, value);
+                },
+                delete: async (key) => {
+                    localStorage.removeItem(key);
+                }
+            };
+        }
+
+        // 2. 建立 Lucide Icon 元件，相容您的 JSX 寫法
         const Icon = ({ name, size = 16, className = "", style = {} }) => {
             useEffect(() => {
                 if (window.lucide && typeof window.lucide.createIcons === 'function') {
                     window.lucide.createIcons();
                 }
             });
-            const iconMap = {
-                'plus': 'plus',
-                'trash-2': 'trash-2',
-                'shuffle': 'shuffle',
-                'x': 'x',
-                'users': 'users',
-                'coffee': 'coffee',
-                'square': 'square',
-                'chevron-down': 'chevron-down',
-                'minus': 'minus',
-                'clock': 'clock',
-                'circle-dot': 'circle-dot',
-                'upload': 'upload'
-            };
-            const lucideName = iconMap[name] || name;
-            return <i data-lucide={lucideName} style={{ width: size, height: size, display: 'inline-block', verticalAlign: 'middle', fontStyle: 'normal', ...style }} className={className}></i>;
+            return <i data-lucide={name} style={{ width: size, height: size, display: 'inline-block', verticalAlign: 'middle', fontStyle: 'normal', ...style }} className={className}></i>;
         };
 
+        const Plus = (props) => <Icon name="plus" {...props} />;
+        const Trash2 = (props) => <Icon name="trash-2" {...props} />;
+        const Shuffle = (props) => <Icon name="shuffle" {...props} />;
+        const X = (props) => <Icon name="x" {...props} />;
+        const Users = (props) => <Icon name="users" {...props} />;
+        const Coffee = (props) => <Icon name="coffee" {...props} />;
+        const Square = (props) => <Icon name="square" {...props} />;
+        const ChevronDown = (props) => <Icon name="chevron-down" {...props} />;
+        const Minus = (props) => <Icon name="minus" {...props} />;
+        const Clock = (props) => <Icon name="clock" {...props} />;
+        const CircleDot = (props) => <Icon name="circle-dot" {...props} />;
+        const Upload = (props) => <Icon name="upload" {...props} />;
+
+        // === 以下完全沿用您的 V5 程式碼邏輯 ===
         const LEVELS = [
-            { v: 1, label: "新手", color: "#7C9A8E" },
-            { v: 2, label: "初階", color: "#4F8F73" },
-            { v: 3, label: "中階", color: "#F4C752" },
-            { v: 4, label: "中高階", color: "#E8944C" },
-            { v: 5, label: "高階", color: "#E8604C" },
+          { v: 1, label: "新手", color: "#7C9A8E" },
+          { v: 2, label: "初階", color: "#4F8F73" },
+          { v: 3, label: "中階", color: "#F4C752" },
+          { v: 4, label: "中高階", color: "#E8944C" },
+          { v: 5, label: "高階", color: "#E8604C" },
         ];
 
         const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         const levelInfo = (v) => LEVELS.find((l) => l.v === v) || LEVELS[0];
 
         const TIERS = {
-            basic: { label: "中階組（新手～中階）", levels: [1, 2, 3] },
-            advanced: { label: "中高階組（中高～高階）", levels: [4, 5] },
+          basic: { label: "中階組（新手～中階）", levels: [1, 2, 3] },
+          advanced: { label: "中高階組（中高～高階）", levels: [4, 5] },
         };
         const tierAllows = (tier, level) => !tier || (TIERS[tier] && TIERS[tier].levels.includes(level));
 
         function emptyGroup(name, courts, mode) {
-            return {
-                name,
-                courts,
-                mode,
-                mixed: false,
-                courtsState: Array.from({ length: courts }, () => ({ matchIds: null, startedAt: null, tier: null, nextIds: [] })),
-                players: [],
-            };
+          return {
+            name,
+            courts,
+            mode, // 'doubles' | 'singles'
+            mixed: false,
+            courtsState: Array.from({ length: courts }, () => ({ matchIds: null, startedAt: null, tier: null, nextIds: [] })),
+            players: [],
+          };
         }
 
         function resizeCourts(group, newCount) {
-            let courtsState = [...group.courtsState];
-            let players = [...group.players];
-            if (newCount < courtsState.length) {
-                const removed = courtsState.slice(newCount);
-                removed.forEach((c) => {
-                    const ids = new Set([...(c.matchIds || []), ...(c.nextIds || [])]);
-                    if (ids.size) {
-                        players = players.map((p) => (ids.has(p.id) ? { ...p, status: "waiting", joinedAt: Date.now() } : p));
-                    }
-                });
-                courtsState = courtsState.slice(0, newCount);
-            } else if (newCount > courtsState.length) {
-                const add = newCount - courtsState.length;
-                for (let i = 0; i < add; i++) courtsState.push({ matchIds: null, startedAt: null, tier: null, nextIds: [] });
-            }
-            return { ...group, courts: newCount, courtsState, players };
+          let courtsState = [...group.courtsState];
+          let players = [...group.players];
+          if (newCount < courtsState.length) {
+            const removed = courtsState.slice(newCount);
+            removed.forEach((c) => {
+              const ids = new Set([...(c.matchIds || []), ...(c.nextIds || [])]);
+              if (ids.size) {
+                players = players.map((p) => (ids.has(p.id) ? { ...p, status: "waiting", joinedAt: Date.now() } : p));
+              }
+            });
+            courtsState = courtsState.slice(0, newCount);
+          } else if (newCount > courtsState.length) {
+            const add = newCount - courtsState.length;
+            for (let i = 0; i < add; i++) courtsState.push({ matchIds: null, startedAt: null, tier: null, nextIds: [] });
+          }
+          return { ...group, courts: newCount, courtsState, players };
         }
 
         function autoAssign(group) {
-            const courtsState = group.courtsState.map((c) => ({ ...c }));
-            const perCourt = group.mode === "singles" ? 2 : 4;
-            const reserved = new Set();
-            const playingIds = new Set();
-            const queuedIds = new Set();
-            const now = Date.now();
-            let filled = 0;
-            let queued = 0;
+          const courtsState = group.courtsState.map((c) => ({ ...c }));
+          const perCourt = group.mode === "singles" ? 2 : 4;
+          const reserved = new Set();
+          const playingIds = new Set();
+          const queuedIds = new Set();
+          const now = Date.now();
+          let filled = 0;
+          let queued = 0;
 
-            const pickFor = (tier) => {
-                const pool = group.players
-                    .filter((p) => p.status === "waiting" && !reserved.has(p.id) && tierAllows(tier, p.level))
-                    .sort((a, b) => a.gamesPlayed - b.gamesPlayed || a.joinedAt - b.joinedAt);
-                if (group.mode === "doubles" && group.mixed) {
-                    const males = pool.filter((p) => p.gender === "M");
-                    const females = pool.filter((p) => p.gender === "F");
-                    return males.length >= 2 && females.length >= 2 ? [males[0], males[1], females[0], females[1]] : null;
-                }
-                return pool.length >= perCourt ? pool.slice(0, perCourt) : null;
-            };
-
-            for (let i = 0; i < courtsState.length; i++) {
-                if (courtsState[i].matchIds) continue;
-                const chosen = pickFor(courtsState[i].tier);
-                if (chosen) {
-                    chosen.forEach((p) => { reserved.add(p.id); playingIds.add(p.id); });
-                    courtsState[i] = { ...courtsState[i], matchIds: chosen.map((p) => p.id), startedAt: now };
-                    filled++;
-                }
+          const pickFor = (tier) => {
+            const pool = group.players
+              .filter((p) => p.status === "waiting" && !reserved.has(p.id) && tierAllows(tier, p.level))
+              .sort((a, b) => a.gamesPlayed - b.gamesPlayed || a.joinedAt - b.joinedAt);
+            if (group.mode === "doubles" && group.mixed) {
+              const males = pool.filter((p) => p.gender === "M");
+              const females = pool.filter((p) => p.gender === "F");
+              return males.length >= 2 && females.length >= 2 ? [males[0], males[1], females[0], females[1]] : null;
             }
+            return pool.length >= perCourt ? pool.slice(0, perCourt) : null;
+          };
 
-            for (let i = 0; i < courtsState.length; i++) {
-                const c = courtsState[i];
-                if (!c.matchIds || (c.nextIds && c.nextIds.length)) continue;
-                const chosen = pickFor(c.tier);
-                if (chosen) {
-                    chosen.forEach((p) => { reserved.add(p.id); queuedIds.add(p.id); });
-                    courtsState[i] = { ...c, nextIds: chosen.map((p) => p.id) };
-                    queued++;
-                }
+          for (let i = 0; i < courtsState.length; i++) {
+            if (courtsState[i].matchIds) continue;
+            const chosen = pickFor(courtsState[i].tier);
+            if (chosen) {
+              chosen.forEach((p) => { reserved.add(p.id); playingIds.add(p.id); });
+              courtsState[i] = { ...courtsState[i], matchIds: chosen.map((p) => p.id), startedAt: now };
+              filled++;
             }
+          }
 
-            if (filled === 0 && queued === 0) return { group, filled: 0, queued: 0 };
-            const players = group.players.map((p) => {
-                if (playingIds.has(p.id)) return { ...p, status: "playing" };
-                if (queuedIds.has(p.id)) return { ...p, status: "queued" };
-                return p;
-            });
-            return { group: { ...group, courtsState, players }, filled, queued };
+          for (let i = 0; i < courtsState.length; i++) {
+            const c = courtsState[i];
+            if (!c.matchIds || (c.nextIds && c.nextIds.length)) continue;
+            const chosen = pickFor(c.tier);
+            if (chosen) {
+              chosen.forEach((p) => { reserved.add(p.id); queuedIds.add(p.id); });
+              courtsState[i] = { ...c, nextIds: chosen.map((p) => p.id) };
+              queued++;
+            }
+          }
+
+          if (filled === 0 && queued === 0) return { group, filled: 0, queued: 0 };
+          const players = group.players.map((p) => {
+            if (playingIds.has(p.id)) return { ...p, status: "playing" };
+            if (queuedIds.has(p.id)) return { ...p, status: "queued" };
+            return p;
+          });
+          return { group: { ...group, courtsState, players }, filled, queued };
         }
 
         function endMatch(group, courtIdx) {
-            const court = group.courtsState[courtIdx];
-            if (!court || !court.matchIds) return group;
-            const finishedIds = new Set(court.matchIds);
-            const now = Date.now();
-            let players = group.players.map((p) =>
-                finishedIds.has(p.id) ? { ...p, status: "waiting", gamesPlayed: p.gamesPlayed + 1, joinedAt: now } : p
-            );
+          const court = group.courtsState[courtIdx];
+          if (!court || !court.matchIds) return group;
+          const finishedIds = new Set(court.matchIds);
+          const now = Date.now();
+          let players = group.players.map((p) =>
+            finishedIds.has(p.id) ? { ...p, status: "waiting", gamesPlayed: p.gamesPlayed + 1, joinedAt: now } : p
+          );
 
-            const hasNext = court.nextIds && court.nextIds.length > 0;
-            let courtsState;
-            if (hasNext) {
-                const nextIds = court.nextIds;
-                players = players.map((p) => (nextIds.includes(p.id) ? { ...p, status: "playing" } : p));
-                courtsState = group.courtsState.map((c, i) =>
-                    i === courtIdx ? { ...c, matchIds: nextIds, startedAt: now, nextIds: [] } : c
-                );
-            } else {
-                courtsState = group.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: null, startedAt: null } : c));
-            }
-            return { ...group, players, courtsState };
+          const hasNext = court.nextIds && court.nextIds.length > 0;
+          let courtsState;
+          if (hasNext) {
+            const nextIds = court.nextIds;
+            players = players.map((p) => (nextIds.includes(p.id) ? { ...p, status: "playing" } : p));
+            courtsState = group.courtsState.map((c, i) =>
+              i === courtIdx ? { ...c, matchIds: nextIds, startedAt: now, nextIds: [] } : c
+            );
+          } else {
+            courtsState = group.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: null, startedAt: null } : c));
+          }
+          return { ...group, players, courtsState };
         }
 
         function fmtElapsed(startedAt, now) {
-            const s = Math.max(0, Math.floor((now - startedAt) / 1000));
-            const m = Math.floor(s / 60);
-            const sec = s % 60;
-            return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
+          const s = Math.max(0, Math.floor((now - startedAt) / 1000));
+          const m = Math.floor(s / 60);
+          const sec = s % 60;
+          return `${String(m).padStart(2, "0")}:${String(sec).padStart(2, "0")}`;
         }
 
         function fmtWait(joinedAt, now) {
-            const m = Math.max(0, Math.floor((now - joinedAt) / 60000));
-            return m < 1 ? "剛加入" : `等待 ${m} 分`;
+          const m = Math.max(0, Math.floor((now - joinedAt) / 60000));
+          return m < 1 ? "剛加入" : `等待 ${m} 分`;
         }
 
         function parseImportLines(text) {
-            const levelMap = {};
-            LEVELS.forEach((l) => { levelMap[l.label] = l.v; });
-            return text
-                .split(/\r?\n/)
-                .map((line) => line.trim())
-                .filter(Boolean)
-                .map((line) => {
-                    const parts = line.split(/[,，\t]/).map((s) => s.trim()).filter(Boolean);
-                    const name = parts[0];
-                    let level = 3;
-                    let gender = "M";
-                    for (let i = 1; i < parts.length; i++) {
-                        const seg = parts[i];
-                        if (levelMap[seg] !== undefined) level = levelMap[seg];
-                        else if (/^[1-5]$/.test(seg)) level = Number(seg);
-                        else if (/^(m|男)$/i.test(seg)) gender = "M";
-                        else if (/^(f|女)$/i.test(seg)) gender = "F";
-                    }
-                    return { name, level, gender };
-                })
-                .filter((p) => p.name);
+          const levelMap = {};
+          LEVELS.forEach((l) => { levelMap[l.label] = l.v; });
+          return text
+            .split(/\r?\n/)
+            .map((line) => line.trim())
+            .filter(Boolean)
+            .map((line) => {
+              const parts = line.split(/[,，\t]/).map((s) => s.trim()).filter(Boolean);
+              const name = parts[0];
+              let level = 3;
+              let gender = "M";
+              for (let i = 1; i < parts.length; i++) {
+                const seg = parts[i];
+                if (levelMap[seg] !== undefined) level = levelMap[seg];
+                else if (/^[1-5]$/.test(seg)) level = Number(seg);
+                else if (/^(m|男)$/i.test(seg)) gender = "M";
+                else if (/^(f|女)$/i.test(seg)) gender = "F";
+              }
+              return { name, level, gender };
+            })
+            .filter((p) => p.name);
         }
 
         function BadmintonLineup() {
-            const [ready, setReady] = useState(false);
-            const [storageOk, setStorageOk] = useState(true);
-            const [groupsIndex, setGroupsIndex] = useState([]);
-            const [activeId, setActiveId] = useState(null);
-            const [group, setGroup] = useState(null);
-            const [now, setNow] = useState(Date.now());
-            const [showNewGroup, setShowNewGroup] = useState(false);
-            const [newGroupName, setNewGroupName] = useState("");
-            const [newGroupCourts, setNewGroupCourts] = useState(6);
-            const [newGroupMode, setNewGroupMode] = useState("doubles");
-            const [confirmDelete, setConfirmDelete] = useState(false);
-            const [showRest, setShowRest] = useState(false);
-            const [selected, setSelected] = useState([]);
-            const [pName, setPName] = useState("");
-            const [pLevel, setPLevel] = useState(3);
-            const [pGender, setPGender] = useState("M");
-            const [assignMsg, setAssignMsg] = useState("");
-            const [showImport, setShowImport] = useState(false);
-            const [importText, setImportText] = useState("");
-            const skipSave = useRef(false);
+          const [ready, setReady] = useState(false);
+          const [storageOk, setStorageOk] = useState(true);
+          const [groupsIndex, setGroupsIndex] = useState([]);
+          const [activeId, setActiveId] = useState(null);
+          const [group, setGroup] = useState(null);
+          const [now, setNow] = useState(Date.now());
+          const [showNewGroup, setShowNewGroup] = useState(false);
+          const [newGroupName, setNewGroupName] = useState("");
+          const [newGroupCourts, setNewGroupCourts] = useState(6);
+          const [newGroupMode, setNewGroupMode] = useState("doubles");
+          const [confirmDelete, setConfirmDelete] = useState(false);
+          const [showRest, setShowRest] = useState(false);
+          const [selected, setSelected] = useState([]);
+          const [pName, setPName] = useState("");
+          const [pLevel, setPLevel] = useState(3);
+          const [pGender, setPGender] = useState("M");
+          const [assignMsg, setAssignMsg] = useState("");
+          const [showImport, setShowImport] = useState(false);
+          const [importText, setImportText] = useState("");
+          const skipSave = useRef(false);
 
-            useEffect(() => {
-                const t = setInterval(() => setNow(Date.now()), 1000);
-                return () => clearInterval(t);
-            }, []);
+          useEffect(() => {
+            const t = setInterval(() => setNow(Date.now()), 1000);
+            return () => clearInterval(t);
+          }, []);
 
-            useEffect(() => {
-                try {
-                    const r = localStorage.getItem("badminton-groups-index");
-                    const idx = r ? JSON.parse(r) : [];
-                    setGroupsIndex(idx);
-                    if (idx.length > 0) {
-                        loadGroup(idx[0].id);
-                    }
-                } catch (e) {
-                    setGroupsIndex([]);
-                }
-                setReady(true);
-            }, []);
-
-            useEffect(() => {
-                if (window.lucide && typeof window.lucide.createIcons === 'function') {
-                    window.lucide.createIcons();
-                }
-            });
-
-            function loadGroup(id) {
-                try {
-                    const r = localStorage.getItem(`badminton-group-${id}`);
-                    const data = r ? JSON.parse(r) : null;
-                    skipSave.current = true;
-                    setActiveId(id);
-                    setGroup(data);
-                    setSelected([]);
-                } catch (e) {
-                    setGroup(null);
-                }
-            }
-
-            useEffect(() => {
-                if (!activeId || !group) return;
-                if (skipSave.current) {
-                    skipSave.current = false;
-                    return;
-                }
-                try {
-                    localStorage.setItem(`badminton-group-${activeId}`, JSON.stringify(group));
-                } catch (e) {
-                    setStorageOk(false);
-                }
-            }, [group, activeId]);
-
-            function saveIndex(idx) {
+          useEffect(() => {
+            (async () => {
+              try {
+                const r = await window.storage.get("badminton-groups-index", true);
+                const idx = r ? JSON.parse(r.value) : [];
                 setGroupsIndex(idx);
-                try {
-                    localStorage.setItem("badminton-groups-index", JSON.stringify(idx));
-                } catch (e) {
-                    setStorageOk(false);
-                }
-            }
-
-            function createGroup() {
-                const name = newGroupName.trim() || "臨打團";
-                const id = uid();
-                const g = emptyGroup(name, newGroupCourts, newGroupMode);
-                skipSave.current = false;
-                const idx = [...groupsIndex, { id, name }];
-                saveIndex(idx);
-                try {
-                    localStorage.setItem(`badminton-group-${id}`, JSON.stringify(g));
-                } catch (e) {
-                    setStorageOk(false);
-                }
-                setActiveId(id);
-                setGroup(g);
-                setSelected([]);
-                setShowNewGroup(false);
-                setNewGroupName("");
-                setNewGroupCourts(6);
-                setNewGroupMode("doubles");
-            }
-
-            function deleteGroup() {
-                const idx = groupsIndex.filter((g) => g.id !== activeId);
-                try {
-                    localStorage.removeItem(`badminton-group-${activeId}`);
-                } catch (e) {}
-                saveIndex(idx);
-                setConfirmDelete(false);
                 if (idx.length > 0) {
-                    loadGroup(idx[0].id);
-                } else {
-                    setActiveId(null);
-                    setGroup(null);
+                  await loadGroup(idx[0].id);
                 }
+              } catch (e) {
+                setGroupsIndex([]);
+              }
+              setReady(true);
+            })();
+          }, []);
+
+          async function loadGroup(id) {
+            try {
+              const r = await window.storage.get(`badminton-group-${id}`, true);
+              const data = r ? JSON.parse(r.value) : null;
+              skipSave.current = true;
+              setActiveId(id);
+              setGroup(data);
+              setSelected([]);
+            } catch (e) {
+              setGroup(null);
             }
+          }
 
-            function update(fn) {
-                setGroup((prev) => fn(prev));
+          useEffect(() => {
+            if (!activeId || !group) return;
+            if (skipSave.current) {
+              skipSave.current = false;
+              return;
             }
+            (async () => {
+              try {
+                await window.storage.set(`badminton-group-${activeId}`, JSON.stringify(group), true);
+              } catch (e) {
+                setStorageOk(false);
+              }
+            })();
+          }, [group, activeId]);
 
-            function addPlayer() {
-                const name = pName.trim();
-                if (!name) return;
-                update((g) => ({
-                    ...g,
-                    players: [
-                        ...g.players,
-                        { id: uid(), name, level: pLevel, gender: pGender, status: "waiting", gamesPlayed: 0, joinedAt: Date.now() },
-                    ],
-                }));
-                setPName("");
+          async function saveIndex(idx) {
+            setGroupsIndex(idx);
+            try {
+              await window.storage.set("badminton-groups-index", JSON.stringify(idx), true);
+            } catch (e) {
+              setStorageOk(false);
             }
+          }
 
-            function handleImportFile(e) {
-                const file = e.target.files[0];
-                if (!file) return;
-                const reader = new FileReader();
-                reader.onload = (ev) => setImportText(ev.target.result || "");
-                reader.readAsText(file, "utf-8");
-                e.target.value = "";
+          async function createGroup() {
+            const name = newGroupName.trim() || "臨打團";
+            const id = uid();
+            const g = emptyGroup(name, newGroupCourts, newGroupMode);
+            skipSave.current = false;
+            const idx = [...groupsIndex, { id, name }];
+            await saveIndex(idx);
+            try {
+              await window.storage.set(`badminton-group-${id}`, JSON.stringify(g), true);
+            } catch (e) {
+              setStorageOk(false);
             }
+            setActiveId(id);
+            setGroup(g);
+            setSelected([]);
+            setShowNewGroup(false);
+            setNewGroupName("");
+            setNewGroupCourts(6);
+            setNewGroupMode("doubles");
+          }
 
-            function confirmImport() {
-                const parsed = parseImportLines(importText);
-                if (parsed.length === 0) return;
-                const base = Date.now();
-                update((g) => ({
-                    ...g,
-                    players: [
-                        ...g.players,
-                        ...parsed.map((p, i) => ({
-                            id: uid(),
-                            name: p.name,
-                            level: p.level,
-                            gender: p.gender,
-                            status: "waiting",
-                            gamesPlayed: 0,
-                            joinedAt: base + i,
-                        })),
-                    ],
-                }));
-                setImportText("");
-                setShowImport(false);
+          async function deleteGroup() {
+            const idx = groupsIndex.filter((g) => g.id !== activeId);
+            try {
+              await window.storage.delete(`badminton-group-${activeId}`, true);
+            } catch (e) {}
+            await saveIndex(idx);
+            setConfirmDelete(false);
+            if (idx.length > 0) {
+              await loadGroup(idx[0].id);
+            } else {
+              setActiveId(null);
+              setGroup(null);
             }
+          }
 
-            function removePlayer(id) {
-                update((g) => ({ ...g, players: g.players.filter((p) => p.id !== id) }));
-                setSelected((s) => s.filter((x) => x !== id));
+          function update(fn) {
+            setGroup((prev) => fn(prev));
+          }
+
+          function addPlayer() {
+            const name = pName.trim();
+            if (!name) return;
+            update((g) => ({
+              ...g,
+              players: [
+                ...g.players,
+                { id: uid(), name, level: pLevel, gender: pGender, status: "waiting", gamesPlayed: 0, joinedAt: Date.now() },
+              ],
+            }));
+            setPName("");
+          }
+
+          function handleImportFile(e) {
+            const file = e.target.files[0];
+            if (!file) return;
+            const reader = new FileReader();
+            reader.onload = (ev) => setImportText(ev.target.result || "");
+            reader.readAsText(file, "utf-8");
+            e.target.value = "";
+          }
+
+          function confirmImport() {
+            const parsed = parseImportLines(importText);
+            if (parsed.length === 0) return;
+            const base = Date.now();
+            update((g) => ({
+              ...g,
+              players: [
+                ...g.players,
+                ...parsed.map((p, i) => ({
+                  id: uid(),
+                  name: p.name,
+                  level: p.level,
+                  gender: p.gender,
+                  status: "waiting",
+                  gamesPlayed: 0,
+                  joinedAt: base + i,
+                })),
+              ],
+            }));
+            setImportText("");
+            setShowImport(false);
+          }
+
+          function removePlayer(id) {
+            update((g) => ({ ...g, players: g.players.filter((p) => p.id !== id) }));
+            setSelected((s) => s.filter((x) => x !== id));
+          }
+
+          function toggleRest(id) {
+            update((g) => ({
+              ...g,
+              players: g.players.map((p) =>
+                p.id === id
+                  ? { ...p, status: p.status === "resting" ? "waiting" : "resting", joinedAt: Date.now() }
+                  : p
+              ),
+            }));
+            setSelected((s) => s.filter((x) => x !== id));
+          }
+
+          function toggleSelect(id) {
+            const perCourt = group.mode === "singles" ? 2 : 4;
+            setSelected((s) => {
+              if (s.includes(id)) return s.filter((x) => x !== id);
+              if (s.length >= perCourt) return s;
+              return [...s, id];
+            });
+          }
+
+          function assignManual(courtIdx) {
+            const perCourt = group.mode === "singles" ? 2 : 4;
+            if (selected.length !== perCourt) return;
+            const tier = group.courtsState[courtIdx].tier;
+            if (tier) {
+              const ok = selected.every((id) => {
+                const p = group.players.find((pp) => pp.id === id);
+                return p && tierAllows(tier, p.level);
+              });
+              if (!ok) return;
             }
+            const now2 = Date.now();
+            update((g) => ({
+              ...g,
+              courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: [...selected], startedAt: now2 } : c)),
+              players: g.players.map((p) => (selected.includes(p.id) ? { ...p, status: "playing" } : p)),
+            }));
+            setSelected([]);
+          }
 
-            function toggleRest(id) {
-                update((g) => ({
-                    ...g,
-                    players: g.players.map((p) =>
-                        p.id === id
-                            ? { ...p, status: p.status === "resting" ? "waiting" : "resting", joinedAt: Date.now() }
-                            : p
-                    ),
-                }));
-                setSelected((s) => s.filter((x) => x !== id));
+          function assignNext(courtIdx) {
+            const perCourt = group.mode === "singles" ? 2 : 4;
+            if (selected.length !== perCourt) return;
+            const court = group.courtsState[courtIdx];
+            if (!court.matchIds || (court.nextIds && court.nextIds.length)) return;
+            if (court.tier) {
+              const ok = selected.every((id) => {
+                const p = group.players.find((pp) => pp.id === id);
+                return p && tierAllows(court.tier, p.level);
+              });
+              if (!ok) return;
             }
+            update((g) => ({
+              ...g,
+              courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, nextIds: [...selected] } : c)),
+              players: g.players.map((p) => (selected.includes(p.id) ? { ...p, status: "queued" } : p)),
+            }));
+            setSelected([]);
+          }
 
-            function toggleSelect(id) {
-                const perCourt = group.mode === "singles" ? 2 : 4;
-                setSelected((s) => {
-                    if (s.includes(id)) return s.filter((x) => x !== id);
-                    if (s.length >= perCourt) return s;
-                    return [...s, id];
-                });
+          function clearNext(courtIdx) {
+            update((g) => {
+              const court = g.courtsState[courtIdx];
+              const ids = new Set(court.nextIds || []);
+              return {
+                ...g,
+                courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, nextIds: [] } : c)),
+                players: g.players.map((p) => (ids.has(p.id) ? { ...p, status: "waiting", joinedAt: Date.now() } : p)),
+              };
+            });
+          }
+
+          function setCourtTier(courtIdx, tier) {
+            update((g) => ({
+              ...g,
+              courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, tier } : c)),
+            }));
+          }
+
+          function handleEnd(courtIdx) {
+            update((g) => endMatch(g, courtIdx));
+          }
+
+          function handleAutoAssign() {
+            const { group: next, filled, queued } = autoAssign(group);
+            setGroup(next);
+            if (!filled && !queued) {
+              setAssignMsg("候補人數不足或條件不符，無法排入新的場次");
+            } else {
+              const parts = [];
+              if (filled) parts.push(`已排入 ${filled} 場`);
+              if (queued) parts.push(`預備 ${queued} 場下一輪名單`);
+              setAssignMsg(parts.join("，"));
             }
+            setTimeout(() => setAssignMsg(""), 3000);
+          }
 
-            function assignManual(courtIdx) {
-                const perCourt = group.mode === "singles" ? 2 : 4;
-                if (selected.length !== perCourt) return;
-                const tier = group.courtsState[courtIdx].tier;
-                if (tier) {
-                    const ok = selected.every((id) => {
-                        const p = group.players.find((pp) => pp.id === id);
-                        return p && tierAllows(tier, p.level);
-                    });
-                    if (!ok) return;
-                }
-                const now2 = Date.now();
-                update((g) => ({
-                    ...g,
-                    courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: [...selected], startedAt: now2 } : c)),
-                    players: g.players.map((p) => (selected.includes(p.id) ? { ...p, status: "playing" } : p)),
-                }));
-                setSelected([]);
-            }
+          function changeCourts(delta) {
+            const n = Math.max(1, Math.min(20, group.courts + delta));
+            if (n === group.courts) return;
+            update((g) => resizeCourts(g, n));
+          }
 
-            function assignNext(courtIdx) {
-                const perCourt = group.mode === "singles" ? 2 : 4;
-                if (selected.length !== perCourt) return;
-                const court = group.courtsState[courtIdx];
-                if (!court.matchIds || (court.nextIds && court.nextIds.length)) return;
-                if (court.tier) {
-                    const ok = selected.every((id) => {
-                        const p = group.players.find((pp) => pp.id === id);
-                        return p && tierAllows(court.tier, p.level);
-                    });
-                    if (!ok) return;
-                }
-                update((g) => ({
-                    ...g,
-                    courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, nextIds: [...selected] } : c)),
-                    players: g.players.map((p) => (selected.includes(p.id) ? { ...p, status: "queued" } : p)),
-                }));
-                setSelected([]);
-            }
-
-            function clearNext(courtIdx) {
-                update((g) => {
-                    const court = g.courtsState[courtIdx];
-                    const ids = new Set(court.nextIds || []);
-                    return {
-                        ...g,
-                        courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, nextIds: [] } : c)),
-                        players: g.players.map((p) => (ids.has(p.id) ? { ...p, status: "waiting", joinedAt: Date.now() } : p)),
-                    };
-                });
-            }
-
-            function setCourtTier(courtIdx, tier) {
-                update((g) => ({
-                    ...g,
-                    courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, tier } : c)),
-                }));
-            }
-
-            function handleEnd(courtIdx) {
-                update((g) => endMatch(g, courtIdx));
-            }
-
-            function handleAutoAssign() {
-                const { group: next, filled, queued } = autoAssign(group);
-                setGroup(next);
-                if (!filled && !queued) {
-                    setAssignMsg("候補人數不足或條件不符，無法排入新的場次");
-                } else {
-                    const parts = [];
-                    if (filled) parts.push(`已排入 ${filled} 場`);
-                    if (queued) parts.push(`預備 ${queued} 場下一輪名單`);
-                    setAssignMsg(parts.join("，"));
-                }
-                setTimeout(() => setAssignMsg(""), 3000);
-            }
-
-            function changeCourts(delta) {
-                const n = Math.max(1, Math.min(20, group.courts + delta));
-                if (n === group.courts) return;
-                update((g) => resizeCourts(g, n));
-            }
-
-            if (!ready) {
-                return <div style={{ fontFamily: "var(--f-body)", padding: 40, color: "#5B6B66" }}>載入中…</div>;
-            }
-
-            const rootStyle = {
-                "--ink": "#16233A",
-                "--court": "#1F6650",
-                "--court-dark": "#164C3B",
-                "--yellow": "#F4C752",
-                "--coral": "#E8604C",
-                "--paper": "#EDEAE2",
-                "--panel": "#E2DECF",
-                "--line": "rgba(255,255,255,0.55)",
-                "--muted": "#66756E",
-                "--f-body": "'Noto Sans TC', sans-serif",
-                "--f-num": "'Oswald', 'Noto Sans TC', sans-serif",
-                background: "var(--paper)",
-                color: "var(--ink)",
-                fontFamily: "var(--f-body)",
-                minHeight: 640,
-                padding: "24px",
-                borderRadius: 16,
-                maxWidth: 1200,
-                margin: "0 auto",
-                boxShadow: "0 10px 25px rgba(0,0,0,0.08)"
-            };
-
+          if (!ready) {
             return (
-                <div style={rootStyle}>
-                    {groupsIndex.length === 0 && !showNewGroup && (
-                        <div style={{ textAlign: "center", padding: "80px 20px" }}>
-                            <h1 style={{ fontSize: 24, fontWeight: 900, margin: "0 0 8px" }}>建立第一個羽球臨打團</h1>
-                            <p style={{ color: "var(--muted)", margin: "0 0 24px" }}>設定場地數與比賽模式，開始管理報名與排點</p>
-                            <button
-                                className="bl-btn"
-                                onClick={() => setShowNewGroup(true)}
-                                style={{ background: "var(--court)", color: "#fff", padding: "12px 24px", borderRadius: 10, fontSize: 15, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 8 }}
-                            >
-                                <Icon name="plus" size={18} /> 新增球團
-                            </button>
-                        </div>
-                    )}
-
-                    {(groupsIndex.length > 0 || showNewGroup) && (
-                        <>
-                            {/* Header */}
-                            <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 20 }}>
-                                <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: -0.5, display: "flex", alignItems: "center", gap: 8 }}>
-                                    {group && <span>{group.name}</span>}
-                                </div>
-
-                                {groupsIndex.length > 0 && (
-                                    <div style={{ position: "relative" }}>
-                                        <select
-                                            value={activeId || ""}
-                                            onChange={(e) => loadGroup(e.target.value)}
-                                            style={{
-                                                appearance: "none", background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8,
-                                                padding: "8px 32px 8px 12px", fontSize: 13, fontWeight: 500, color: "var(--ink)", cursor: "pointer",
-                                            }}
-                                        >
-                                            {groupsIndex.map((g) => (
-                                                <option key={g.id} value={g.id}>{g.name}</option>
-                                            ))}
-                                        </select>
-                                        <Icon name="chevron-down" size={14} style={{ position: "absolute", right: 10, top: 12, pointerEvents: "none", color: "var(--muted)" }} />
-                                    </div>
-                                )}
-
-                                <button
-                                    className="bl-btn"
-                                    onClick={() => setShowNewGroup((v) => !v)}
-                                    style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
-                                >
-                                    <Icon name="plus" size={14} /> 新增球團
-                                </button>
-
-                                {group && (
-                                    <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
-                                        <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "4px 10px" }}>
-                                            <span style={{ fontSize: 12, color: "var(--muted)" }}>場地</span>
-                                            <button className="bl-btn" onClick={() => changeCourts(-1)} style={{ background: "none", padding: 4, display: "flex" }}><Icon name="minus" size={14} /></button>
-                                            <span style={{ fontFamily: "var(--f-num)", fontSize: 15, fontWeight: 600, minWidth: 18, textAlign: "center" }}>{group.courts}</span>
-                                            <button className="bl-btn" onClick={() => changeCourts(1)} style={{ background: "none", padding: 4, display: "flex" }}><Icon name="plus" size={14} /></button>
-                                        </div>
-
-                                        <select
-                                            value={group.mode}
-                                            onChange={(e) => update((g) => ({ ...g, mode: e.target.value, mixed: e.target.value === "singles" ? false : g.mixed }))}
-                                            style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "7px 10px", fontSize: 13 }}
-                                        >
-                                            <option value="doubles">雙打</option>
-                                            <option value="singles">單打</option>
-                                        </select>
-
-                                        {group.mode === "doubles" && (
-                                            <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)", cursor: "pointer" }}>
-                                                <input type="checkbox" checked={group.mixed} onChange={(e) => update((g) => ({ ...g, mixed: e.target.checked }))} />
-                                                混雙限定
-                                            </label>
-                                        )}
-
-                                        {!confirmDelete ? (
-                                            <button className="bl-btn" onClick={() => setConfirmDelete(true)} style={{ background: "none", padding: 6, color: "var(--muted)" }} aria-label="刪除球團">
-                                                <Icon name="trash-2" size={16} />
-                                            </button>
-                                        ) : (
-                                            <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
-                                                <span style={{ color: "var(--coral)" }}>確定刪除？</span>
-                                                <button className="bl-btn" onClick={deleteGroup} style={{ background: "var(--coral)", color: "#fff", borderRadius: 6, padding: "4px 8px" }}>刪除</button>
-                                                <button className="bl-btn" onClick={() => setConfirmDelete(false)} style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 6, padding: "4px 8px" }}>取消</button>
-                                            </div>
-                                        )}
-                                    </div>
-                                )}
-                            </div>
-
-                            {showNewGroup && (
-                                <div style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
-                                    <div>
-                                        <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>球團名稱</label>
-                                        <input
-                                            value={newGroupName}
-                                            onChange={(e) => setNewGroupName(e.target.value)}
-                                            placeholder="例如：週三晚場臨打團"
-                                            style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13, width: 200 }}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>場地數</label>
-                                        <input
-                                            type="number" min={1} max={20} value={newGroupCourts}
-                                            onChange={(e) => setNewGroupCourts(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
-                                            style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13, width: 80 }}
-                                        />
-                                    </div>
-                                    <div>
-                                        <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>模式</label>
-                                        <select value={newGroupMode} onChange={(e) => setNewGroupMode(e.target.value)} style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13 }}>
-                                            <option value="doubles">雙打</option>
-                                            <option value="singles">單打</option>
-                                        </select>
-                                    </div>
-                                    <button className="bl-btn" onClick={createGroup} style={{ background: "var(--court)", color: "#fff", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700 }}>建立</button>
-                                    <button className="bl-btn" onClick={() => setShowNewGroup(false)} style={{ background: "none", color: "var(--muted)", fontSize: 13, padding: "9px 6px" }}>取消</button>
-                                </div>
-                            )}
-
-                            {!storageOk && (
-                                <div style={{ background: "#fbe6e2", color: "#8a2d1e", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 16 }}>
-                                    資料儲存失敗，請檢查網路連線。
-                                </div>
-                            )}
-
-                            {group && (
-                                <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
-                                    {/* Courts */}
-                                    <div style={{ flex: "1 1 520px", minWidth: 300 }}>
-                                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 12 }}>
-                                            {group.courtsState.map((c, i) => {
-                                                const perCourt = group.mode === "singles" ? 2 : 4;
-                                                const meetsCount = selected.length === perCourt;
-                                                const meetsLevel = !c.tier || selected.every((id) => {
-                                                    const p = group.players.find((pp) => pp.id === id);
-                                                    return p && tierAllows(c.tier, p.level);
-                                                });
-                                                const canManualAssign = !c.matchIds && meetsCount && meetsLevel;
-                                                return (
-                                                    <div
-                                                        key={i}
-                                                        style={{
-                                                            borderRadius: 12,
-                                                            minHeight: c.matchIds ? 250 : 168,
-                                                            padding: 14,
-                                                            display: "flex",
-                                                            flexDirection: "column",
-                                                            background: c.matchIds ? "var(--court)" : "#fff",
-                                                            border: c.matchIds ? "none" : "1.5px dashed #cfc8b3",
-                                                            color: c.matchIds ? "#fff" : "var(--ink)",
-                                                        }}
-                                                    >
-                                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
-                                                            <span style={{ fontFamily: "var(--f-num)", fontSize: 13, fontWeight: 600, letterSpacing: 0.5, opacity: c.matchIds ? 0.85 : 0.6 }}>
-                                                                場地 {i + 1}
-                                                            </span>
-                                                            {c.matchIds ? (
-                                                                <span style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: "var(--f-num)", fontSize: 15, fontWeight: 600 }}>
-                                                                    <Icon name="clock" size={13} /> {fmtElapsed(c.startedAt, now)}
-                                                                </span>
-                                                            ) : (
-                                                                <span style={{ fontSize: 12, color: "var(--muted)" }}>空場</span>
-                                                            )}
-                                                        </div>
-
-                                                        <div style={{ marginBottom: 10 }}>
-                                                            {!c.matchIds ? (
-                                                                <select
-                                                                    value={c.tier || ""}
-                                                                    onChange={(e) => setCourtTier(i, e.target.value || null)}
-                                                                    style={{
-                                                                        width: "100%", fontSize: 11.5, border: "1px solid #e5e0d1", borderRadius: 6,
-                                                                        padding: "4px 6px", color: "var(--muted)", background: "#faf9f4",
-                                                                    }}
-                                                                >
-                                                                    <option value="">不限等級</option>
-                                                                    <option value="basic">{TIERS.basic.label}</option>
-                                                                    <option value="advanced">{TIERS.advanced.label}</option>
-                                                                </select>
-                                                            ) : (
-                                                                c.tier && (
-                                                                    <span style={{ fontSize: 11, background: "rgba(255,255,255,0.18)", borderRadius: 6, padding: "2px 6px" }}>
-                                                                        限 {TIERS[c.tier].label}
-                                                                    </span>
-                                                                )
-                                                            )}
-                                                        </div>
-
-                                                        {c.matchIds ? (
-                                                            <>
-                                                                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
-                                                                    {c.matchIds.map((pid) => {
-                                                                        const p = group.players.find((x) => x.id === pid);
-                                                                        if (!p) return null;
-                                                                        const lv = levelInfo(p.level);
-                                                                        return (
-                                                                            <div key={pid} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5 }}>
-                                                                                <span style={{ width: 7, height: 7, borderRadius: 4, background: lv.color, flexShrink: 0 }} />
-                                                                                <span>{p.name}</span>
-                                                                            </div>
-                                                                        );
-                                                                    })}
-                                                                </div>
-
-                                                                <div style={{ borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: 8, marginBottom: 8 }}>
-                                                                    <div style={{ fontSize: 10.5, opacity: 0.75, marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                                                                        <span>下一場準備中</span>
-                                                                        {c.nextIds && c.nextIds.length > 0 && (
-                                                                            <button className="bl-btn" onClick={() => clearNext(i)} style={{ background: "none", color: "#fff", opacity: 0.75, padding: 0, display: "flex" }} aria-label="取消準備名單">
-                                                                                <Icon name="x" size={12} />
-                                                                            </button>
-                                                                        )}
-                                                                    </div>
-                                                                    {c.nextIds && c.nextIds.length > 0 ? (
-                                                                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
-                                                                            {c.nextIds.map((pid) => {
-                                                                                const p = group.players.find((x) => x.id === pid);
-                                                                                if (!p) return null;
-                                                                                const lv = levelInfo(p.level);
-                                                                                return (
-                                                                                    <div key={pid} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, opacity: 0.9 }}>
-                                                                                        <span style={{ width: 6, height: 6, borderRadius: 3, background: lv.color, flexShrink: 0 }} />
-                                                                                        <span>{p.name}</span>
-                                                                                    </div>
-                                                                                );
-                                                                            })}
-                                                                        </div>
-                                                                    ) : (
-                                                                        <button
-                                                                            className="bl-btn"
-                                                                            disabled={!(meetsCount && meetsLevel)}
-                                                                            onClick={() => assignNext(i)}
-                                                                            style={{
-                                                                                width: "100%", fontSize: 11.5, fontWeight: 600, borderRadius: 6, padding: "6px 0",
-                                                                                background: meetsCount && meetsLevel ? "rgba(244,199,82,0.9)" : "rgba(255,255,255,0.12)",
-                                                                                color: meetsCount && meetsLevel ? "#4A3708" : "rgba(255,255,255,0.6)",
-                                                                                cursor: meetsCount && meetsLevel ? "pointer" : "default",
-                                                                            }}
-                                                                        >
-                                                                            {!meetsCount
-                                                                                ? `選 ${perCourt} 位候補設下一場`
-                                                                                : !meetsLevel
-                                                                                ? `不符資格（需${TIERS[c.tier].label}）`
-                                                                                : `設定 ${selected.length} 人為下一場`}
-                                                                        </button>
-                                                                    )}
-                                                                </div>
-
-                                                                <button
-                                                                    className="bl-btn"
-                                                                    onClick={() => handleEnd(i)}
-                                                                    style={{ background: "rgba(255,255,255,0.15)", color: "#fff", borderRadius: 8, padding: "7px 0", fontSize: 12.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
-                                                                >
-                                                                    <Icon name="square" size={12} /> 結束比賽
-                                                                </button>
-                                                            </>
-                                                        ) : (
-                                                            <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                                                <button
-                                                                    className="bl-btn"
-                                                                    disabled={!canManualAssign}
-                                                                    onClick={() => assignManual(i)}
-                                                                    style={{
-                                                                        fontSize: 12.5, fontWeight: 600, borderRadius: 8, padding: "8px 14px",
-                                                                        background: canManualAssign ? "var(--yellow)" : "#f1efe6",
-                                                                        color: canManualAssign ? "#4A3708" : "#a9a290",
-                                                                        cursor: canManualAssign ? "pointer" : "default",
-                                                                        textAlign: "center",
-                                                                    }}
-                                                                >
-                                                                    {!meetsCount
-                                                                        ? `選 ${perCourt} 位候補後指派`
-                                                                        : !meetsLevel
-                                                                        ? `所選球友不符資格（需${TIERS[c.tier].label}）`
-                                                                        : `指派 ${selected.length} 人到此場`}
-                                                                </button>
-                                                            </div>
-                                                        )}
-                                                    </div>
-                                                );
-                                            })}
-                                        </div>
-                                    </div>
-
-                                    {/* Sidebar */}
-                                    <div style={{ width: 320, flex: "0 0 320px", background: "var(--panel)", borderRadius: 12, padding: 16 }}>
-                                        <button
-                                            className="bl-btn"
-                                            onClick={handleAutoAssign}
-                                            style={{ width: "100%", background: "var(--yellow)", color: "#4A3708", borderRadius: 10, padding: "12px 0", fontSize: 14.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}
-                                        >
-                                            <Icon name="shuffle" size={16} /> 自動排點
-                                        </button>
-                                        {assignMsg && <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", marginBottom: 8 }}>{assignMsg}</div>}
-
-                                        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
-                                            <input
-                                                value={pName}
-                                                onChange={(e) => setPName(e.target.value)}
-                                                onKeyDown={(e) => e.key === "Enter" && addPlayer()}
-                                                placeholder="球友姓名"
-                                                style={{ flex: 1, border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13, minWidth: 0, background: "#fff" }}
-                                            />
-                                            <select value={pLevel} onChange={(e) => setPLevel(Number(e.target.value))} style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 4px", fontSize: 12.5, background: "#fff" }}>
-                                                {LEVELS.map((l) => <option key={l.v} value={l.v}>{l.label}</option>)}
-                                            </select>
-                                            <select value={pGender} onChange={(e) => setPGender(e.target.value)} style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 4px", fontSize: 12.5, background: "#fff" }}>
-                                                <option value="M">男</option>
-                                                <option value="F">女</option>
-                                            </select>
-                                            <button className="bl-btn" onClick={addPlayer} style={{ background: "var(--court)", color: "#fff", borderRadius: 8, padding: "0 12px", display: "flex", alignItems: "center", justifyContent: "center" }}>
-                                                <Icon name="plus" size={16} />
-                                            </button>
-                                        </div>
-
-                                        <button
-                                            className="bl-btn"
-                                            onClick={() => setShowImport((v) => !v)}
-                                            style={{ background: "none", color: "var(--muted)", fontSize: 12, display: "flex", alignItems: "center", gap: 4, padding: "0 0 12px" }}
-                                        >
-                                            <Icon name="upload" size={12} /> 批次匯入球友 <Icon name="chevron-down" size={12} style={{ transform: showImport ? "rotate(180deg)" : "none" }} />
-                                        </button>
-
-                                        {showImport && (
-                                            <div style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 10, padding: 10, marginBottom: 14 }}>
-                                                <textarea
-                                                    value={importText}
-                                                    onChange={(e) => setImportText(e.target.value)}
-                                                    placeholder={"每行一位球友，可加逗號註明等級與性別：\\n小明,中階,男\\n小華,女\\n小美"}
-                                                    rows={4}
-                                                    style={{ width: "100%", border: "1px solid #e5e0d1", borderRadius: 8, padding: 8, fontSize: 12.5, fontFamily: "var(--f-body)", resize: "vertical", boxSizing: "border-box" }}
-                                                />
-                                                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
-                                                    <label className="bl-btn" style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
-                                                        <Icon name="upload" size={12} /> 上傳 .txt / .csv
-                                                        <input type="file" accept=".txt,.csv" onChange={handleImportFile} style={{ display: "none" }} />
-                                                    </label>
-                                                    <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
-                                                        {parseImportLines(importText).length > 0 ? `偵測到 ${parseImportLines(importText).length} 位球友` : "尚未輸入"}
-                                                    </span>
-                                                </div>
-                                                <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
-                                                    <button
-                                                        className="bl-btn"
-                                                        onClick={confirmImport}
-                                                        disabled={parseImportLines(importText).length === 0}
-                                                        style={{
-                                                            flex: 1, borderRadius: 8, padding: "8px 0", fontSize: 12.5, fontWeight: 600,
-                                                            background: parseImportLines(importText).length > 0 ? "var(--court)" : "#f1efe6",
-                                                            color: parseImportLines(importText).length > 0 ? "#fff" : "#a9a290",
-                                                        }}
-                                                    >
-                                                        確認匯入
-                                                    </button>
-                                                    <button
-                                                        className="bl-btn"
-                                                        onClick={() => { setShowImport(false); setImportText(""); }}
-                                                        style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 14px", fontSize: 12.5, color: "var(--muted)" }}
-                                                    >
-                                                        取消
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        )}
-
-                                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
-                                            <Icon name="users" size={13} /> 候補中（{group.players.filter((p) => p.status === "waiting").length}）
-                                        </div>
-
-                                        <div className="bl-scroll" style={{ maxHeight: 340, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
-                                            {group.players
-                                                .filter((p) => p.status === "waiting")
-                                                .sort((a, b) => a.gamesPlayed - b.gamesPlayed || a.joinedAt - b.joinedAt)
-                                                .map((p) => {
-                                                    const lv = levelInfo(p.level);
-                                                    const isSel = selected.includes(p.id);
-                                                    return (
-                                                        <div
-                                                            key={p.id}
-                                                            className="bl-row"
-                                                            onClick={() => toggleSelect(p.id)}
-                                                            style={{
-                                                                display: "flex", alignItems: "center", gap: 8, background: isSel ? "#FCEFC8" : "#fff",
-                                                                border: isSel ? "1.5px solid var(--yellow)" : "1px solid #e5e0d1",
-                                                                borderRadius: 8, padding: "7px 9px", cursor: "pointer",
-                                                            }}
-                                                        >
-                                                            <span style={{ width: 8, height: 8, borderRadius: 4, background: lv.color, flexShrink: 0 }} />
-                                                            <div style={{ flex: 1, minWidth: 0 }}>
-                                                                <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
-                                                                <div style={{ fontSize: 11, color: "var(--muted)" }}>
-                                                                    {lv.label} · {p.gender === "M" ? "男" : "女"} · 已上場 {p.gamesPlayed} 場 · {fmtWait(p.joinedAt, now)}
-                                                                </div>
-                                                            </div>
-                                                            <button className="bl-btn" onClick={(e) => { e.stopPropagation(); toggleRest(p.id); }} style={{ background: "none", padding: 4, color: "var(--muted)" }} aria-label="標記休息">
-                                                                <Icon name="coffee" size={14} />
-                                                            </button>
-                                                            <button className="bl-btn" onClick={(e) => { e.stopPropagation(); removePlayer(p.id); }} style={{ background: "none", padding: 4, color: "var(--muted)" }} aria-label="移除">
-                                                                <Icon name="x" size={14} />
-                                                            </button>
-                                                        </div>
-                                                    );
-                                                })}
-                                            {group.players.filter((p) => p.status === "waiting").length === 0 && (
-                                                <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "10px 2px" }}>目前沒有候補球友，新增球友開始排點。</div>
-                                            )}
-                                        </div>
-
-                                        <button
-                                            className="bl-btn"
-                                            onClick={() => setShowRest((v) => !v)}
-                                            style={{ background: "none", color: "var(--muted)", fontSize: 12, display: "flex", alignItems: "center", gap: 4, padding: "4px 0" }}
-                                        >
-                                            <Icon name="circle-dot" size={12} /> 休息中（{group.players.filter((p) => p.status === "resting").length}） <Icon name="chevron-down" size={12} style={{ transform: showRest ? "rotate(180deg)" : "none" }} />
-                                        </button>
-                                        {showRest && (
-                                            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
-                                                {group.players.filter((p) => p.status === "resting").map((p) => (
-                                                    <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #e5e0d1", borderRadius: 8, padding: "6px 9px" }}>
-                                                        <div style={{ flex: 1, fontSize: 13 }}>{p.name}</div>
-                                                        <button className="bl-btn" onClick={() => toggleRest(p.id)} style={{ background: "var(--court)", color: "#fff", borderRadius: 6, padding: "3px 8px", fontSize: 11.5 }}>
-                                                            恢復候補
-                                                        </button>
-                                                    </div>
-                                                ))}
-                                                {group.players.filter((p) => p.status === "resting").length === 0 && (
-                                                    <div style={{ fontSize: 12, color: "var(--muted)" }}>沒有休息中的球友。</div>
-                                                )}
-                                            </div>
-                                        )}
-                                    </div>
-                                </div>
-                            )}
-                        </>
-                    )}
-                </div>
+              <div style={{ fontFamily: "var(--f-body)", padding: 40, color: "#5B6B66" }}>載入中…</div>
             );
+          }
+
+          const rootStyle = {
+            "--ink": "#16233A",
+            "--court": "#1F6650",
+            "--court-dark": "#164C3B",
+            "--yellow": "#F4C752",
+            "--coral": "#E8604C",
+            "--paper": "#EDEAE2",
+            "--panel": "#E2DECF",
+            "--line": "rgba(255,255,255,0.55)",
+            "--muted": "#66756E",
+            "--f-body": "'Noto Sans TC', sans-serif",
+            "--f-num": "'Oswald', 'Noto Sans TC', sans-serif",
+            background: "var(--paper)",
+            color: "var(--ink)",
+            fontFamily: "var(--f-body)",
+            minHeight: 640,
+            padding: "24px",
+            borderRadius: 16,
+          };
+
+          return (
+            <div style={rootStyle}>
+              <style>{`
+                @import url('https://fonts.googleapis.com/css2?family=Noto+Sans+TC:wght@400;500;700;900&family=Oswald:wght@500;600&display=swap');
+                .bl-scroll::-webkit-scrollbar{width:6px}
+                .bl-scroll::-webkit-scrollbar-thumb{background:#c8c2b0;border-radius:4px}
+                .bl-btn{cursor:pointer;border:none;font-family:var(--f-body)}
+                .bl-btn:active{transform:scale(0.97)}
+                .bl-row{transition:background 0.15s, border-color 0.15s}
+              `}</style>
+
+              {groupsIndex.length === 0 && !showNewGroup && (
+                <div style={{ textAlign: "center", padding: "80px 20px" }}>
+                  <h1 style={{ fontSize: 24, fontWeight: 900, margin: "0 0 8px" }}>建立第一個羽球臨打團</h1>
+                  <p style={{ color: "var(--muted)", margin: "0 0 24px" }}>設定場地數與比賽模式，開始管理報名與排點</p>
+                  <button
+                    className="bl-btn"
+                    onClick={() => setShowNewGroup(true)}
+                    style={{ background: "var(--court)", color: "#fff", padding: "12px 24px", borderRadius: 10, fontSize: 15, fontWeight: 700, display: "inline-flex", alignItems: "center", gap: 8 }}
+                  >
+                    <Plus size={18} /> 新增球團
+                  </button>
+                </div>
+              )}
+
+              {(groupsIndex.length > 0 || showNewGroup) && (
+                <>
+                  {/* Header */}
+                  <div style={{ display: "flex", flexWrap: "wrap", alignItems: "center", gap: 12, marginBottom: 20 }}>
+                    <div style={{ fontSize: 22, fontWeight: 900, letterSpacing: -0.5, display: "flex", alignItems: "center", gap: 8 }}>
+                      {group && <span>{group.name}</span>}
+                    </div>
+
+                    {groupsIndex.length > 0 && (
+                      <div style={{ position: "relative" }}>
+                        <select
+                          value={activeId || ""}
+                          onChange={(e) => loadGroup(e.target.value)}
+                          style={{
+                            appearance: "none", background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8,
+                            padding: "8px 32px 8px 12px", fontSize: 13, fontWeight: 500, color: "var(--ink)", cursor: "pointer",
+                          }}
+                        >
+                          {groupsIndex.map((g) => (
+                            <option key={g.id} value={g.id}>{g.name}</option>
+                          ))}
+                        </select>
+                        <ChevronDown size={14} style={{ position: "absolute", right: 10, top: 10, pointerEvents: "none", color: "var(--muted)" }} />
+                      </div>
+                    )}
+
+                    <button
+                      className="bl-btn"
+                      onClick={() => setShowNewGroup((v) => !v)}
+                      style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 14px", fontSize: 13, fontWeight: 500, display: "flex", alignItems: "center", gap: 6 }}
+                    >
+                      <Plus size={14} /> 新增球團
+                    </button>
+
+                    {group && (
+                      <div style={{ marginLeft: "auto", display: "flex", alignItems: "center", gap: 10, flexWrap: "wrap" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "4px 10px" }}>
+                          <span style={{ fontSize: 12, color: "var(--muted)" }}>場地</span>
+                          <button className="bl-btn" onClick={() => changeCourts(-1)} style={{ background: "none", padding: 4, display: "flex" }}><Minus size={14} /></button>
+                          <span style={{ fontFamily: "var(--f-num)", fontSize: 15, fontWeight: 600, minWidth: 18, textAlign: "center" }}>{group.courts}</span>
+                          <button className="bl-btn" onClick={() => changeCourts(1)} style={{ background: "none", padding: 4, display: "flex" }}><Plus size={14} /></button>
+                        </div>
+
+                        <select
+                          value={group.mode}
+                          onChange={(e) => update((g) => ({ ...g, mode: e.target.value, mixed: e.target.value === "singles" ? false : g.mixed }))}
+                          style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "7px 10px", fontSize: 13 }}
+                        >
+                          <option value="doubles">雙打</option>
+                          <option value="singles">單打</option>
+                        </select>
+
+                        {group.mode === "doubles" && (
+                          <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13, color: "var(--muted)", cursor: "pointer" }}>
+                            <input type="checkbox" checked={group.mixed} onChange={(e) => update((g) => ({ ...g, mixed: e.target.checked }))} />
+                            混雙限定
+                          </label>
+                        )}
+
+                        {!confirmDelete ? (
+                          <button className="bl-btn" onClick={() => setConfirmDelete(true)} style={{ background: "none", padding: 6, color: "var(--muted)" }} aria-label="刪除球團">
+                            <Trash2 size={16} />
+                          </button>
+                        ) : (
+                          <div style={{ display: "flex", gap: 6, alignItems: "center", fontSize: 12 }}>
+                            <span style={{ color: "var(--coral)" }}>確定刪除？</span>
+                            <button className="bl-btn" onClick={deleteGroup} style={{ background: "var(--coral)", color: "#fff", borderRadius: 6, padding: "4px 8px" }}>刪除</button>
+                            <button className="bl-btn" onClick={() => setConfirmDelete(false)} style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 6, padding: "4px 8px" }}>取消</button>
+                          </div>
+                        )}
+                      </div>
+                    )}
+                  </div>
+
+                  {showNewGroup && (
+                    <div style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 12, padding: 16, marginBottom: 20, display: "flex", flexWrap: "wrap", gap: 12, alignItems: "flex-end" }}>
+                      <div>
+                        <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>球團名稱</label>
+                        <input
+                          value={newGroupName}
+                          onChange={(e) => setNewGroupName(e.target.value)}
+                          placeholder="例如：週三晚場臨打團"
+                          style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13, width: 200 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>場地數</label>
+                        <input
+                          type="number" min={1} max={20} value={newGroupCourts}
+                          onChange={(e) => setNewGroupCourts(Math.max(1, Math.min(20, Number(e.target.value) || 1)))}
+                          style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13, width: 80 }}
+                        />
+                      </div>
+                      <div>
+                        <label style={{ fontSize: 12, color: "var(--muted)", display: "block", marginBottom: 4 }}>模式</label>
+                        <select value={newGroupMode} onChange={(e) => setNewGroupMode(e.target.value)} style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13 }}>
+                          <option value="doubles">雙打</option>
+                          <option value="singles">單打</option>
+                        </select>
+                      </div>
+                      <button className="bl-btn" onClick={createGroup} style={{ background: "var(--court)", color: "#fff", borderRadius: 8, padding: "9px 18px", fontSize: 13, fontWeight: 700 }}>建立</button>
+                      <button className="bl-btn" onClick={() => setShowNewGroup(false)} style={{ background: "none", color: "var(--muted)", fontSize: 13, padding: "9px 6px" }}>取消</button>
+                    </div>
+                  )}
+
+                  {!storageOk && (
+                    <div style={{ background: "#fbe6e2", color: "#8a2d1e", borderRadius: 8, padding: "8px 12px", fontSize: 13, marginBottom: 16 }}>
+                      資料儲存失敗，請檢查網路連線。此系統的資料為球團共用，所有使用者皆可看見與編輯。
+                    </div>
+                  )}
+
+                  {group && (
+                    <div style={{ display: "flex", gap: 20, flexWrap: "wrap", alignItems: "flex-start" }}>
+                      {/* Courts */}
+                      <div style={{ flex: "1 1 520px", minWidth: 300 }}>
+                        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 12 }}>
+                          {group.courtsState.map((c, i) => {
+                            const perCourt = group.mode === "singles" ? 2 : 4;
+                            const meetsCount = selected.length === perCourt;
+                            const meetsLevel = !c.tier || selected.every((id) => {
+                              const p = group.players.find((pp) => pp.id === id);
+                              return p && tierAllows(c.tier, p.level);
+                            });
+                            const canManualAssign = !c.matchIds && meetsCount && meetsLevel;
+                            return (
+                              <div
+                                key={i}
+                                style={{
+                                  borderRadius: 12,
+                                  minHeight: c.matchIds ? 250 : 168,
+                                  padding: 14,
+                                  display: "flex",
+                                  flexDirection: "column",
+                                  background: c.matchIds ? "var(--court)" : "#fff",
+                                  border: c.matchIds ? "none" : "1.5px dashed #cfc8b3",
+                                  color: c.matchIds ? "#fff" : "var(--ink)",
+                                }}
+                              >
+                                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
+                                  <span style={{ fontFamily: "var(--f-num)", fontSize: 13, fontWeight: 600, letterSpacing: 0.5, opacity: c.matchIds ? 0.85 : 0.6 }}>
+                                    場地 {i + 1}
+                                  </span>
+                                  {c.matchIds ? (
+                                    <span style={{ display: "flex", alignItems: "center", gap: 4, fontFamily: "var(--f-num)", fontSize: 15, fontWeight: 600 }}>
+                                      <Clock size={13} /> {fmtElapsed(c.startedAt, now)}
+                                    </span>
+                                  ) : (
+                                    <span style={{ fontSize: 12, color: "var(--muted)" }}>空場</span>
+                                  )}
+                                </div>
+
+                                <div style={{ marginBottom: 10 }}>
+                                  {!c.matchIds ? (
+                                    <select
+                                      value={c.tier || ""}
+                                      onChange={(e) => setCourtTier(i, e.target.value || null)}
+                                      style={{
+                                        width: "100%", fontSize: 11.5, border: "1px solid #e5e0d1", borderRadius: 6,
+                                        padding: "4px 6px", color: "var(--muted)", background: "#faf9f4",
+                                      }}
+                                    >
+                                      <option value="">不限等級</option>
+                                      <option value="basic">{TIERS.basic.label}</option>
+                                      <option value="advanced">{TIERS.advanced.label}</option>
+                                    </select>
+                                  ) : (
+                                    c.tier && (
+                                      <span style={{ fontSize: 11, background: "rgba(255,255,255,0.18)", borderRadius: 6, padding: "2px 6px" }}>
+                                        限 {TIERS[c.tier].label}
+                                      </span>
+                                    )
+                                  )}
+                                </div>
+
+                                {c.matchIds ? (
+                                  <>
+                                    <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
+                                      {c.matchIds.map((pid) => {
+                                        const p = group.players.find((x) => x.id === pid);
+                                        if (!p) return null;
+                                        const lv = levelInfo(p.level);
+                                        return (
+                                          <div key={pid} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 13.5 }}>
+                                            <span style={{ width: 7, height: 7, borderRadius: 4, background: lv.color, flexShrink: 0 }} />
+                                            <span>{p.name}</span>
+                                          </div>
+                                        );
+                                      })}
+                                    </div>
+
+                                    <div style={{ borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: 8, marginBottom: 8 }}>
+                                      <div style={{ fontSize: 10.5, opacity: 0.75, marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                        <span>下一場準備中</span>
+                                        {c.nextIds && c.nextIds.length > 0 && (
+                                          <button className="bl-btn" onClick={() => clearNext(i)} style={{ background: "none", color: "#fff", opacity: 0.75, padding: 0, display: "flex" }} aria-label="取消準備名單">
+                                            <X size={12} />
+                                          </button>
+                                        )}
+                                      </div>
+                                      {c.nextIds && c.nextIds.length > 0 ? (
+                                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                          {c.nextIds.map((pid) => {
+                                            const p = group.players.find((x) => x.id === pid);
+                                            if (!p) return null;
+                                            const lv = levelInfo(p.level);
+                                            return (
+                                              <div key={pid} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, opacity: 0.9 }}>
+                                                <span style={{ width: 6, height: 6, borderRadius: 3, background: lv.color, flexShrink: 0 }} />
+                                                <span>{p.name}</span>
+                                              </div>
+                                            );
+                                          })}
+                                        </div>
+                                      ) : (
+                                        <button
+                                          className="bl-btn"
+                                          disabled={!(meetsCount && meetsLevel)}
+                                          onClick={() => assignNext(i)}
+                                          style={{
+                                            width: "100%", fontSize: 11.5, fontWeight: 600, borderRadius: 6, padding: "6px 0",
+                                            background: meetsCount && meetsLevel ? "rgba(244,199,82,0.9)" : "rgba(255,255,255,0.12)",
+                                            color: meetsCount && meetsLevel ? "#4A3708" : "rgba(255,255,255,0.6)",
+                                            cursor: meetsCount && meetsLevel ? "pointer" : "default",
+                                          }}
+                                        >
+                                          {!meetsCount
+                                            ? `選 ${perCourt} 位候補設下一場`
+                                            : !meetsLevel
+                                            ? `不符資格（需${TIERS[c.tier].label}）`
+                                            : `設定 ${selected.length} 人為下一場`}
+                                        </button>
+                                      )}
+                                    </div>
+
+                                    <button
+                                      className="bl-btn"
+                                      onClick={() => handleEnd(i)}
+                                      style={{ background: "rgba(255,255,255,0.15)", color: "#fff", borderRadius: 8, padding: "7px 0", fontSize: 12.5, fontWeight: 600, display: "flex", alignItems: "center", justifyContent: "center", gap: 6 }}
+                                    >
+                                      <Square size={12} /> 結束比賽
+                                    </button>
+                                  </>
+                                ) : (
+                                  <div style={{ flex: 1, display: "flex", alignItems: "center", justifyContent: "center" }}>
+                                    <button
+                                      className="bl-btn"
+                                      disabled={!canManualAssign}
+                                      onClick={() => assignManual(i)}
+                                      style={{
+                                        fontSize: 12.5, fontWeight: 600, borderRadius: 8, padding: "8px 14px",
+                                        background: canManualAssign ? "var(--yellow)" : "#f1efe6",
+                                        color: canManualAssign ? "#4A3708" : "#a9a290",
+                                        cursor: canManualAssign ? "pointer" : "default",
+                                        textAlign: "center",
+                                      }}
+                                    >
+                                      {!meetsCount
+                                        ? `選 ${perCourt} 位候補後指派`
+                                        : !meetsLevel
+                                        ? `所選球友不符資格（需${TIERS[c.tier].label}）`
+                                        : `指派 ${selected.length} 人到此場`}
+                                    </button>
+                                  </div>
+                                )}
+                              </div>
+                            );
+                          })}
+                        </div>
+                      </div>
+
+                      {/* Sidebar */}
+                      <div style={{ width: 320, flex: "0 0 320px", background: "var(--panel)", borderRadius: 12, padding: 16 }}>
+                        <button
+                          className="bl-btn"
+                          onClick={handleAutoAssign}
+                          style={{ width: "100%", background: "var(--yellow)", color: "#4A3708", borderRadius: 10, padding: "12px 0", fontSize: 14.5, fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", gap: 8, marginBottom: 8 }}
+                        >
+                          <Shuffle size={16} /> 自動排點
+                        </button>
+                        {assignMsg && <div style={{ fontSize: 12, color: "var(--muted)", textAlign: "center", marginBottom: 8 }}>{assignMsg}</div>}
+
+                        <div style={{ display: "flex", gap: 6, marginBottom: 14 }}>
+                          <input
+                            value={pName}
+                            onChange={(e) => setPName(e.target.value)}
+                            onKeyDown={(e) => e.key === "Enter" && addPlayer()}
+                            placeholder="球友姓名"
+                            style={{ flex: 1, border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 10px", fontSize: 13, minWidth: 0 }}
+                          />
+                          <select value={pLevel} onChange={(e) => setPLevel(Number(e.target.value))} style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 4px", fontSize: 12.5 }}>
+                            {LEVELS.map((l) => <option key={l.v} value={l.v}>{l.label}</option>)}
+                          </select>
+                          <select value={pGender} onChange={(e) => setPGender(e.target.value)} style={{ border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 4px", fontSize: 12.5 }}>
+                            <option value="M">男</option>
+                            <option value="F">女</option>
+                          </select>
+                          <button className="bl-btn" onClick={addPlayer} style={{ background: "var(--court)", color: "#fff", borderRadius: 8, padding: "0 12px" }}>
+                            <Plus size={16} />
+                          </button>
+                        </div>
+
+                        <button
+                          className="bl-btn"
+                          onClick={() => setShowImport((v) => !v)}
+                          style={{ background: "none", color: "var(--muted)", fontSize: 12, display: "flex", alignItems: "center", gap: 4, padding: "0 0 12px" }}
+                        >
+                          <Upload size={12} /> 批次匯入球友 <ChevronDown size={12} style={{ transform: showImport ? "rotate(180deg)" : "none" }} />
+                        </button>
+
+                        {showImport && (
+                          <div style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 10, padding: 10, marginBottom: 14 }}>
+                            <textarea
+                              value={importText}
+                              onChange={(e) => setImportText(e.target.value)}
+                              placeholder={"每行一位球友，可加逗號註明等級與性別：\n小明,中階,男\n小華,女\n小美"}
+                              rows={4}
+                              style={{ width: "100%", border: "1px solid #e5e0d1", borderRadius: 8, padding: 8, fontSize: 12.5, fontFamily: "var(--f-body)", resize: "vertical", boxSizing: "border-box" }}
+                            />
+                            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 8, gap: 8 }}>
+                              <label className="bl-btn" style={{ fontSize: 12, color: "var(--muted)", display: "flex", alignItems: "center", gap: 4, cursor: "pointer" }}>
+                                <Upload size={12} /> 上傳 .txt / .csv
+                                <input type="file" accept=".txt,.csv" onChange={handleImportFile} style={{ display: "none" }} />
+                              </label>
+                              <span style={{ fontSize: 11.5, color: "var(--muted)" }}>
+                                {parseImportLines(importText).length > 0 ? `偵測到 ${parseImportLines(importText).length} 位球友` : "尚未輸入"}
+                              </span>
+                            </div>
+                            <div style={{ display: "flex", gap: 6, marginTop: 8 }}>
+                              <button
+                                className="bl-btn"
+                                onClick={confirmImport}
+                                disabled={parseImportLines(importText).length === 0}
+                                style={{
+                                  flex: 1, borderRadius: 8, padding: "8px 0", fontSize: 12.5, fontWeight: 600,
+                                  background: parseImportLines(importText).length > 0 ? "var(--court)" : "#f1efe6",
+                                  color: parseImportLines(importText).length > 0 ? "#fff" : "#a9a290",
+                                }}
+                              >
+                                確認匯入
+                              </button>
+                              <button
+                                className="bl-btn"
+                                onClick={() => { setShowImport(false); setImportText(""); }}
+                                style={{ background: "#fff", border: "1px solid #d8d2c0", borderRadius: 8, padding: "8px 14px", fontSize: 12.5, color: "var(--muted)" }}
+                              >
+                                取消
+                              </button>
+                            </div>
+                          </div>
+                        )}
+
+                        <div style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, fontWeight: 600, color: "var(--muted)", marginBottom: 6 }}>
+                          <Users size={13} /> 候補中（{group.players.filter((p) => p.status === "waiting").length}）
+                        </div>
+
+                        <div className="bl-scroll" style={{ maxHeight: 340, overflowY: "auto", display: "flex", flexDirection: "column", gap: 6, marginBottom: 12 }}>
+                          {group.players
+                            .filter((p) => p.status === "waiting")
+                            .sort((a, b) => a.gamesPlayed - b.gamesPlayed || a.joinedAt - b.joinedAt)
+                            .map((p) => {
+                              const lv = levelInfo(p.level);
+                              const isSel = selected.includes(p.id);
+                              return (
+                                <div
+                                  key={p.id}
+                                  className="bl-row"
+                                  onClick={() => toggleSelect(p.id)}
+                                  style={{
+                                    display: "flex", alignItems: "center", gap: 8, background: isSel ? "#FCEFC8" : "#fff",
+                                    border: isSel ? "1.5px solid var(--yellow)" : "1px solid #e5e0d1",
+                                    borderRadius: 8, padding: "7px 9px", cursor: "pointer",
+                                  }}
+                                >
+                                  <span style={{ width: 8, height: 8, borderRadius: 4, background: lv.color, flexShrink: 0 }} />
+                                  <div style={{ flex: 1, minWidth: 0 }}>
+                                    <div style={{ fontSize: 13, fontWeight: 500, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{p.name}</div>
+                                    <div style={{ fontSize: 11, color: "var(--muted)" }}>
+                                      {lv.label} · {p.gender === "M" ? "男" : "女"} · 已上場 {p.gamesPlayed} 場 · {fmtWait(p.joinedAt, now)}
+                                    </div>
+                                  </div>
+                                  <button className="bl-btn" onClick={(e) => { e.stopPropagation(); toggleRest(p.id); }} style={{ background: "none", padding: 4, color: "var(--muted)" }} aria-label="標記休息">
+                                    <Coffee size={14} />
+                                  </button>
+                                  <button className="bl-btn" onClick={(e) => { e.stopPropagation(); removePlayer(p.id); }} style={{ background: "none", padding: 4, color: "var(--muted)" }} aria-label="移除">
+                                    <X size={14} />
+                                  </button>
+                                </div>
+                              );
+                            })}
+                          {group.players.filter((p) => p.status === "waiting").length === 0 && (
+                            <div style={{ fontSize: 12.5, color: "var(--muted)", padding: "10px 2px" }}>目前沒有候補球友，新增球友開始排點。</div>
+                          )}
+                        </div>
+
+                        <button
+                          className="bl-btn"
+                          onClick={() => setShowRest((v) => !v)}
+                          style={{ background: "none", color: "var(--muted)", fontSize: 12, display: "flex", alignItems: "center", gap: 4, padding: "4px 0" }}
+                        >
+                          <CircleDot size={12} /> 休息中（{group.players.filter((p) => p.status === "resting").length}） <ChevronDown size={12} style={{ transform: showRest ? "rotate(180deg)" : "none" }} />
+                        </button>
+                        {showRest && (
+                          <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 6 }}>
+                            {group.players.filter((p) => p.status === "resting").map((p) => (
+                              <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 8, background: "#fff", border: "1px solid #e5e0d1", borderRadius: 8, padding: "6px 9px" }}>
+                                <div style={{ flex: 1, fontSize: 13 }}>{p.name}</div>
+                                <button className="bl-btn" onClick={() => toggleRest(p.id)} style={{ background: "var(--court)", color: "#fff", borderRadius: 6, padding: "3px 8px", fontSize: 11.5 }}>
+                                  恢復候補
+                                </button>
+                              </div>
+                            ))}
+                            {group.players.filter((p) => p.status === "resting").length === 0 && (
+                              <div style={{ fontSize: 12, color: "var(--muted)" }}>沒有休息中的球友。</div>
+                            )}
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </>
+              )}
+            </div>
+          );
         }
 
         ReactDOM.createRoot(document.getElementById("root")).render(<BadmintonLineup />);
