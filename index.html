@@ -1,4 +1,4 @@
-html_content = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -27,14 +27,12 @@ html_content = """<!DOCTYPE html>
     <script type="text/babel">
         const { useState, useEffect, useRef } = React;
 
-        // Safe Icon component rendering via lucide library or simple SVG fallback
         const Icon = ({ name, size = 16, className = "", style = {} }) => {
             useEffect(() => {
                 if (window.lucide && typeof window.lucide.createIcons === 'function') {
                     window.lucide.createIcons();
                 }
             });
-            // Map lucide-react names to standard lucide data-lucide names
             const iconMap = {
                 'plus': 'plus',
                 'trash-2': 'trash-2',
@@ -694,7 +692,3 @@ html_content = """<!DOCTYPE html>
     </script>
 </body>
 </html>
-"""
-
-with open("badminton-lineup.html", "w", encoding="utf-8") as f:
-    f.write(html_content)
