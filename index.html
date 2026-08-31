@@ -1,4 +1,4 @@
-html_content = """<!DOCTYPE html>
+<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -192,11 +192,11 @@ html_content = """<!DOCTYPE html>
             const levelMap = {};
             LEVELS.forEach((l) => { levelMap[l.label] = l.v; });
             return text
-                .split(/\\r?\\n/)
+                .split(/\r?\n/)
                 .map((line) => line.trim())
                 .filter(Boolean)
                 .map((line) => {
-                    const parts = line.split(/[,，\\t]/).map((s) => s.trim()).filter(Boolean);
+                    const parts = line.split(/[,，\t]/).map((s) => s.trim()).filter(Boolean);
                     const name = parts[0];
                     let level = 3;
                     let gender = "M";
@@ -900,7 +900,7 @@ html_content = """<!DOCTYPE html>
                                                             onClick={() => toggleSelect(p.id)}
                                                             style={{
                                                                 display: "flex", alignItems: "center", gap: 8, background: isSel ? "#FCEFC8" : "#fff",
-                                                                border: isSel ? "1.5px solid var(--yellow)" : "1.5px solid #e5e0d1",
+                                                                border: isSel ? "1.5px solid var(--yellow)" : "1px solid #e5e0d1",
                                                                 borderRadius: 8, padding: "7px 9px", cursor: "pointer",
                                                             }}
                                                         >
@@ -960,7 +960,3 @@ html_content = """<!DOCTYPE html>
     </script>
 </body>
 </html>
-"""
-
-with open("badminton-lineup_V5.html", "w", encoding="utf-8") as f:
-    f.write(html_content)
