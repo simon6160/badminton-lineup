@@ -1,4 +1,4 @@
-<!DOCTYPE html>
+html_content = """<!DOCTYPE html>
 <html lang="zh-TW">
 <head>
     <meta charset="UTF-8">
@@ -77,7 +77,7 @@
                 courts,
                 mode,
                 mixed: false,
-                courtsState: Array.from({ length: courts }, () => ({ matchIds: null, startedAt: null, tier: null })),
+                courtsState: Array.from({ length: courts }, () => ({ matchIds: null, startedAt: null, tier: null, nextIds: [] })),
                 players: [],
             };
         }
@@ -88,15 +88,15 @@
             if (newCount < courtsState.length) {
                 const removed = courtsState.slice(newCount);
                 removed.forEach((c) => {
-                    if (c.matchIds) {
-                        const ids = new Set(c.matchIds);
+                    const ids = new Set([...(c.matchIds || []), ...(c.nextIds || [])]);
+                    if (ids.size) {
                         players = players.map((p) => (ids.has(p.id) ? { ...p, status: "waiting", joinedAt: Date.now() } : p));
                     }
                 });
                 courtsState = courtsState.slice(0, newCount);
             } else if (newCount > courtsState.length) {
                 const add = newCount - courtsState.length;
-                for (let i = 0; i < add; i++) courtsState.push({ matchIds: null, startedAt: null, tier: null });
+                for (let i = 0; i < add; i++) courtsState.push({ matchIds: null, startedAt: null, tier: null, nextIds: [] });
             }
             return { ...group, courts: newCount, courtsState, players };
         }
@@ -104,50 +104,75 @@
         function autoAssign(group) {
             const courtsState = group.courtsState.map((c) => ({ ...c }));
             const perCourt = group.mode === "singles" ? 2 : 4;
-            const assigned = new Set();
-            let changed = false;
+            const reserved = new Set();
+            const playingIds = new Set();
+            const queuedIds = new Set();
             const now = Date.now();
+            let filled = 0;
+            let queued = 0;
 
-            for (let i = 0; i < courtsState.length; i++) {
-                if (courtsState[i].matchIds) continue;
-                const tier = courtsState[i].tier;
-                let pool = group.players
-                    .filter((p) => p.status === "waiting" && !assigned.has(p.id) && tierAllows(tier, p.level))
+            const pickFor = (tier) => {
+                const pool = group.players
+                    .filter((p) => p.status === "waiting" && !reserved.has(p.id) && tierAllows(tier, p.level))
                     .sort((a, b) => a.gamesPlayed - b.gamesPlayed || a.joinedAt - b.joinedAt);
-
-                let chosen = null;
                 if (group.mode === "doubles" && group.mixed) {
                     const males = pool.filter((p) => p.gender === "M");
                     const females = pool.filter((p) => p.gender === "F");
-                    if (males.length >= 2 && females.length >= 2) {
-                        chosen = [males[0], males[1], females[0], females[1]];
-                    }
-                } else if (pool.length >= perCourt) {
-                    chosen = pool.slice(0, perCourt);
+                    return males.length >= 2 && females.length >= 2 ? [males[0], males[1], females[0], females[1]] : null;
                 }
+                return pool.length >= perCourt ? pool.slice(0, perCourt) : null;
+            };
 
+            for (let i = 0; i < courtsState.length; i++) {
+                if (courtsState[i].matchIds) continue;
+                const chosen = pickFor(courtsState[i].tier);
                 if (chosen) {
-                    chosen.forEach((p) => assigned.add(p.id));
-                    courtsState[i] = { matchIds: chosen.map((p) => p.id), startedAt: now };
-                    changed = true;
+                    chosen.forEach((p) => { reserved.add(p.id); playingIds.add(p.id); });
+                    courtsState[i] = { ...courtsState[i], matchIds: chosen.map((p) => p.id), startedAt: now };
+                    filled++;
                 }
             }
 
-            if (!changed) return { group, filled: 0 };
-            const players = group.players.map((p) => (assigned.has(p.id) ? { ...p, status: "playing" } : p));
-            const filled = courtsState.filter((c, i) => c.matchIds && !group.courtsState[i].matchIds).length;
-            return { group: { ...group, courtsState, players }, filled };
+            for (let i = 0; i < courtsState.length; i++) {
+                const c = courtsState[i];
+                if (!c.matchIds || (c.nextIds && c.nextIds.length)) continue;
+                const chosen = pickFor(c.tier);
+                if (chosen) {
+                    chosen.forEach((p) => { reserved.add(p.id); queuedIds.add(p.id); });
+                    courtsState[i] = { ...c, nextIds: chosen.map((p) => p.id) };
+                    queued++;
+                }
+            }
+
+            if (filled === 0 && queued === 0) return { group, filled: 0, queued: 0 };
+            const players = group.players.map((p) => {
+                if (playingIds.has(p.id)) return { ...p, status: "playing" };
+                if (queuedIds.has(p.id)) return { ...p, status: "queued" };
+                return p;
+            });
+            return { group: { ...group, courtsState, players }, filled, queued };
         }
 
         function endMatch(group, courtIdx) {
             const court = group.courtsState[courtIdx];
             if (!court || !court.matchIds) return group;
-            const ids = new Set(court.matchIds);
+            const finishedIds = new Set(court.matchIds);
             const now = Date.now();
-            const players = group.players.map((p) =>
-                ids.has(p.id) ? { ...p, status: "waiting", gamesPlayed: p.gamesPlayed + 1, joinedAt: now } : p
+            let players = group.players.map((p) =>
+                finishedIds.has(p.id) ? { ...p, status: "waiting", gamesPlayed: p.gamesPlayed + 1, joinedAt: now } : p
             );
-            const courtsState = group.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: null, startedAt: null } : c));
+
+            const hasNext = court.nextIds && court.nextIds.length > 0;
+            let courtsState;
+            if (hasNext) {
+                const nextIds = court.nextIds;
+                players = players.map((p) => (nextIds.includes(p.id) ? { ...p, status: "playing" } : p));
+                courtsState = group.courtsState.map((c, i) =>
+                    i === courtIdx ? { ...c, matchIds: nextIds, startedAt: now, nextIds: [] } : c
+                );
+            } else {
+                courtsState = group.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: null, startedAt: null } : c));
+            }
             return { ...group, players, courtsState };
         }
 
@@ -167,11 +192,11 @@
             const levelMap = {};
             LEVELS.forEach((l) => { levelMap[l.label] = l.v; });
             return text
-                .split(/\r?\n/)
+                .split(/\\r?\\n/)
                 .map((line) => line.trim())
                 .filter(Boolean)
                 .map((line) => {
-                    const parts = line.split(/[,，\t]/).map((s) => s.trim()).filter(Boolean);
+                    const parts = line.split(/[,，\\t]/).map((s) => s.trim()).filter(Boolean);
                     const name = parts[0];
                     let level = 3;
                     let gender = "M";
@@ -400,6 +425,38 @@
                 setSelected([]);
             }
 
+            function assignNext(courtIdx) {
+                const perCourt = group.mode === "singles" ? 2 : 4;
+                if (selected.length !== perCourt) return;
+                const court = group.courtsState[courtIdx];
+                if (!court.matchIds || (court.nextIds && court.nextIds.length)) return;
+                if (court.tier) {
+                    const ok = selected.every((id) => {
+                        const p = group.players.find((pp) => pp.id === id);
+                        return p && tierAllows(court.tier, p.level);
+                    });
+                    if (!ok) return;
+                }
+                update((g) => ({
+                    ...g,
+                    courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, nextIds: [...selected] } : c)),
+                    players: g.players.map((p) => (selected.includes(p.id) ? { ...p, status: "queued" } : p)),
+                }));
+                setSelected([]);
+            }
+
+            function clearNext(courtIdx) {
+                update((g) => {
+                    const court = g.courtsState[courtIdx];
+                    const ids = new Set(court.nextIds || []);
+                    return {
+                        ...g,
+                        courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, nextIds: [] } : c)),
+                        players: g.players.map((p) => (ids.has(p.id) ? { ...p, status: "waiting", joinedAt: Date.now() } : p)),
+                    };
+                });
+            }
+
             function setCourtTier(courtIdx, tier) {
                 update((g) => ({
                     ...g,
@@ -412,9 +469,16 @@
             }
 
             function handleAutoAssign() {
-                const { group: next, filled } = autoAssign(group);
+                const { group: next, filled, queued } = autoAssign(group);
                 setGroup(next);
-                setAssignMsg(filled > 0 ? `已排入 ${filled} 場` : "候補人數不足或條件不符，無法排入新的場次");
+                if (!filled && !queued) {
+                    setAssignMsg("候補人數不足或條件不符，無法排入新的場次");
+                } else {
+                    const parts = [];
+                    if (filled) parts.push(`已排入 ${filled} 場`);
+                    if (queued) parts.push(`預備 ${queued} 場下一輪名單`);
+                    setAssignMsg(parts.join("，"));
+                }
                 setTimeout(() => setAssignMsg(""), 3000);
             }
 
@@ -596,7 +660,7 @@
                                                         key={i}
                                                         style={{
                                                             borderRadius: 12,
-                                                            minHeight: 168,
+                                                            minHeight: c.matchIds ? 250 : 168,
                                                             padding: 14,
                                                             display: "flex",
                                                             flexDirection: "column",
@@ -643,7 +707,7 @@
 
                                                         {c.matchIds ? (
                                                             <>
-                                                                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, marginBottom: 10 }}>
+                                                                <div style={{ flex: 1, display: "flex", flexDirection: "column", gap: 4, marginBottom: 8 }}>
                                                                     {c.matchIds.map((pid) => {
                                                                         const p = group.players.find((x) => x.id === pid);
                                                                         if (!p) return null;
@@ -656,6 +720,51 @@
                                                                         );
                                                                     })}
                                                                 </div>
+
+                                                                <div style={{ borderTop: "1px solid rgba(255,255,255,0.2)", paddingTop: 8, marginBottom: 8 }}>
+                                                                    <div style={{ fontSize: 10.5, opacity: 0.75, marginBottom: 4, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                                                                        <span>下一場準備中</span>
+                                                                        {c.nextIds && c.nextIds.length > 0 && (
+                                                                            <button className="bl-btn" onClick={() => clearNext(i)} style={{ background: "none", color: "#fff", opacity: 0.75, padding: 0, display: "flex" }} aria-label="取消準備名單">
+                                                                                <Icon name="x" size={12} />
+                                                                            </button>
+                                                                        )}
+                                                                    </div>
+                                                                    {c.nextIds && c.nextIds.length > 0 ? (
+                                                                        <div style={{ display: "flex", flexDirection: "column", gap: 3 }}>
+                                                                            {c.nextIds.map((pid) => {
+                                                                                const p = group.players.find((x) => x.id === pid);
+                                                                                if (!p) return null;
+                                                                                const lv = levelInfo(p.level);
+                                                                                return (
+                                                                                    <div key={pid} style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5, opacity: 0.9 }}>
+                                                                                        <span style={{ width: 6, height: 6, borderRadius: 3, background: lv.color, flexShrink: 0 }} />
+                                                                                        <span>{p.name}</span>
+                                                                                    </div>
+                                                                                );
+                                                                            })}
+                                                                        </div>
+                                                                    ) : (
+                                                                        <button
+                                                                            className="bl-btn"
+                                                                            disabled={!(meetsCount && meetsLevel)}
+                                                                            onClick={() => assignNext(i)}
+                                                                            style={{
+                                                                                width: "100%", fontSize: 11.5, fontWeight: 600, borderRadius: 6, padding: "6px 0",
+                                                                                background: meetsCount && meetsLevel ? "rgba(244,199,82,0.9)" : "rgba(255,255,255,0.12)",
+                                                                                color: meetsCount && meetsLevel ? "#4A3708" : "rgba(255,255,255,0.6)",
+                                                                                cursor: meetsCount && meetsLevel ? "pointer" : "default",
+                                                                            }}
+                                                                        >
+                                                                            {!meetsCount
+                                                                                ? `選 ${perCourt} 位候補設下一場`
+                                                                                : !meetsLevel
+                                                                                ? `不符資格（需${TIERS[c.tier].label}）`
+                                                                                : `設定 ${selected.length} 人為下一場`}
+                                                                        </button>
+                                                                    )}
+                                                                </div>
+
                                                                 <button
                                                                     className="bl-btn"
                                                                     onClick={() => handleEnd(i)}
@@ -851,3 +960,7 @@
     </script>
 </body>
 </html>
+"""
+
+with open("badminton-lineup_V5.html", "w", encoding="utf-8") as f:
+    f.write(html_content)
