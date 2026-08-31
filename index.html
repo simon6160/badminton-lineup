@@ -65,13 +65,19 @@
         const uid = () => `${Date.now().toString(36)}${Math.random().toString(36).slice(2, 8)}`;
         const levelInfo = (v) => LEVELS.find((l) => l.v === v) || LEVELS[0];
 
+        const TIERS = {
+            basic: { label: "中階組（新手～中階）", levels: [1, 2, 3] },
+            advanced: { label: "中高階組（中高～高階）", levels: [4, 5] },
+        };
+        const tierAllows = (tier, level) => !tier || (TIERS[tier] && TIERS[tier].levels.includes(level));
+
         function emptyGroup(name, courts, mode) {
             return {
                 name,
                 courts,
                 mode,
                 mixed: false,
-                courtsState: Array.from({ length: courts }, () => ({ matchIds: null, startedAt: null })),
+                courtsState: Array.from({ length: courts }, () => ({ matchIds: null, startedAt: null, tier: null })),
                 players: [],
             };
         }
@@ -90,7 +96,7 @@
                 courtsState = courtsState.slice(0, newCount);
             } else if (newCount > courtsState.length) {
                 const add = newCount - courtsState.length;
-                for (let i = 0; i < add; i++) courtsState.push({ matchIds: null, startedAt: null });
+                for (let i = 0; i < add; i++) courtsState.push({ matchIds: null, startedAt: null, tier: null });
             }
             return { ...group, courts: newCount, courtsState, players };
         }
@@ -104,8 +110,9 @@
 
             for (let i = 0; i < courtsState.length; i++) {
                 if (courtsState[i].matchIds) continue;
+                const tier = courtsState[i].tier;
                 let pool = group.players
-                    .filter((p) => p.status === "waiting" && !assigned.has(p.id))
+                    .filter((p) => p.status === "waiting" && !assigned.has(p.id) && tierAllows(tier, p.level))
                     .sort((a, b) => a.gamesPlayed - b.gamesPlayed || a.joinedAt - b.joinedAt);
 
                 let chosen = null;
@@ -140,7 +147,7 @@
             const players = group.players.map((p) =>
                 ids.has(p.id) ? { ...p, status: "waiting", gamesPlayed: p.gamesPlayed + 1, joinedAt: now } : p
             );
-            const courtsState = group.courtsState.map((c, i) => (i === courtIdx ? { matchIds: null, startedAt: null } : c));
+            const courtsState = group.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: null, startedAt: null } : c));
             return { ...group, players, courtsState };
         }
 
@@ -227,7 +234,7 @@
                 }
             });
 
-            async function loadGroup(id) {
+            function loadGroup(id) {
                 try {
                     const r = localStorage.getItem(`badminton-group-${id}`);
                     const data = r ? JSON.parse(r) : null;
@@ -376,13 +383,28 @@
             function assignManual(courtIdx) {
                 const perCourt = group.mode === "singles" ? 2 : 4;
                 if (selected.length !== perCourt) return;
+                const tier = group.courtsState[courtIdx].tier;
+                if (tier) {
+                    const ok = selected.every((id) => {
+                        const p = group.players.find((pp) => pp.id === id);
+                        return p && tierAllows(tier, p.level);
+                    });
+                    if (!ok) return;
+                }
                 const now2 = Date.now();
                 update((g) => ({
                     ...g,
-                    courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { matchIds: [...selected], startedAt: now2 } : c)),
+                    courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, matchIds: [...selected], startedAt: now2 } : c)),
                     players: g.players.map((p) => (selected.includes(p.id) ? { ...p, status: "playing" } : p)),
                 }));
                 setSelected([]);
+            }
+
+            function setCourtTier(courtIdx, tier) {
+                update((g) => ({
+                    ...g,
+                    courtsState: g.courtsState.map((c, i) => (i === courtIdx ? { ...c, tier } : c)),
+                }));
             }
 
             function handleEnd(courtIdx) {
@@ -563,7 +585,12 @@
                                         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(210px, 1fr))", gap: 12 }}>
                                             {group.courtsState.map((c, i) => {
                                                 const perCourt = group.mode === "singles" ? 2 : 4;
-                                                const canManualAssign = !c.matchIds && selected.length === perCourt;
+                                                const meetsCount = selected.length === perCourt;
+                                                const meetsLevel = !c.tier || selected.every((id) => {
+                                                    const p = group.players.find((pp) => pp.id === id);
+                                                    return p && tierAllows(c.tier, p.level);
+                                                });
+                                                const canManualAssign = !c.matchIds && meetsCount && meetsLevel;
                                                 return (
                                                     <div
                                                         key={i}
@@ -578,7 +605,7 @@
                                                             color: c.matchIds ? "#fff" : "var(--ink)",
                                                         }}
                                                     >
-                                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                                                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 6 }}>
                                                             <span style={{ fontFamily: "var(--f-num)", fontSize: 13, fontWeight: 600, letterSpacing: 0.5, opacity: c.matchIds ? 0.85 : 0.6 }}>
                                                                 場地 {i + 1}
                                                             </span>
@@ -588,6 +615,29 @@
                                                                 </span>
                                                             ) : (
                                                                 <span style={{ fontSize: 12, color: "var(--muted)" }}>空場</span>
+                                                            )}
+                                                        </div>
+
+                                                        <div style={{ marginBottom: 10 }}>
+                                                            {!c.matchIds ? (
+                                                                <select
+                                                                    value={c.tier || ""}
+                                                                    onChange={(e) => setCourtTier(i, e.target.value || null)}
+                                                                    style={{
+                                                                        width: "100%", fontSize: 11.5, border: "1px solid #e5e0d1", borderRadius: 6,
+                                                                        padding: "4px 6px", color: "var(--muted)", background: "#faf9f4",
+                                                                    }}
+                                                                >
+                                                                    <option value="">不限等級</option>
+                                                                    <option value="basic">{TIERS.basic.label}</option>
+                                                                    <option value="advanced">{TIERS.advanced.label}</option>
+                                                                </select>
+                                                            ) : (
+                                                                c.tier && (
+                                                                    <span style={{ fontSize: 11, background: "rgba(255,255,255,0.18)", borderRadius: 6, padding: "2px 6px" }}>
+                                                                        限 {TIERS[c.tier].label}
+                                                                    </span>
+                                                                )
                                                             )}
                                                         </div>
 
@@ -625,9 +675,14 @@
                                                                         background: canManualAssign ? "var(--yellow)" : "#f1efe6",
                                                                         color: canManualAssign ? "#4A3708" : "#a9a290",
                                                                         cursor: canManualAssign ? "pointer" : "default",
+                                                                        textAlign: "center",
                                                                     }}
                                                                 >
-                                                                    {canManualAssign ? `指派 ${selected.length} 人到此場` : `選 ${perCourt} 位候補後指派`}
+                                                                    {!meetsCount
+                                                                        ? `選 ${perCourt} 位候補後指派`
+                                                                        : !meetsLevel
+                                                                        ? `所選球友不符資格（需${TIERS[c.tier].label}）`
+                                                                        : `指派 ${selected.length} 人到此場`}
                                                                 </button>
                                                             </div>
                                                         )}
